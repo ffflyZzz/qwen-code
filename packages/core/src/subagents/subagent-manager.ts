@@ -148,6 +148,11 @@ export class SubagentManager {
     if (level) {
       // Search only the specified level
       if (level === 'builtin') {
+        // Check if builtin subagents are disabled
+        const isDisabled = this.config.getDisableBuiltinSubagents();
+        if (isDisabled) {
+          return null;
+        }
         return BuiltinAgentRegistry.getBuiltinAgent(name);
       }
 
@@ -179,6 +184,11 @@ export class SubagentManager {
     }
 
     // Try built-in agents as fallback
+    // Check if builtin subagents are disabled
+    const isDisabled = this.config.getDisableBuiltinSubagents();
+    if (isDisabled) {
+      return null;
+    }
     return BuiltinAgentRegistry.getBuiltinAgent(name);
   }
 
@@ -316,11 +326,30 @@ export class SubagentManager {
     const subagents: SubagentConfig[] = [];
     const seenNames = new Set<string>();
 
-    // In SDK mode, only load session-level subagents
+    // In SDK mode, load session-level subagents and optionally builtin
     if (this.config.getSdkMode()) {
-      const levelsToCheck: SubagentLevel[] = options.level
-        ? [options.level]
-        : ['session'];
+      let levelsToCheck: SubagentLevel[];
+
+      if (options.level) {
+        levelsToCheck = [options.level];
+      } else {
+        // Include builtin level if not disabled
+        const isDisabled = this.config.getDisableBuiltinSubagents();
+        levelsToCheck = isDisabled ? ['session'] : ['session', 'builtin'];
+      }
+
+      // Ensure builtin cache is initialized if needed
+      if (
+        levelsToCheck.includes('builtin') &&
+        !this.subagentsCache?.has('builtin')
+      ) {
+        if (!this.subagentsCache) {
+          this.subagentsCache = new Map();
+        }
+        // Directly load builtin agents without going through refreshCache
+        const builtinAgents = BuiltinAgentRegistry.getBuiltinAgents();
+        this.subagentsCache.set('builtin', builtinAgents);
+      }
 
       for (const level of levelsToCheck) {
         const levelSubagents = this.subagentsCache?.get(level) || [];
@@ -423,6 +452,35 @@ export class SubagentManager {
     }));
 
     this.subagentsCache.set('session', sessionSubagents);
+
+    // In SDK mode, also initialize builtin level cache based on current disableBuiltinSubagents setting
+    if (this.config.getSdkMode()) {
+      const builtinSubagents = this.config.getDisableBuiltinSubagents()
+        ? []
+        : BuiltinAgentRegistry.getBuiltinAgents();
+      this.subagentsCache.set('builtin', builtinSubagents);
+    }
+
+    this.notifyChangeListeners();
+  }
+
+  /**
+   * Refreshes the builtin cache when disableBuiltinSubagents setting changes.
+   * This is called by Config.setDisableBuiltinSubagents().
+   *
+   * @param isDisabled - The new value of disableBuiltinSubagents
+   */
+  refreshBuiltinCache(isDisabled: boolean): void {
+    if (!this.subagentsCache) {
+      this.subagentsCache = new Map();
+    }
+
+    const builtinSubagents = isDisabled
+      ? []
+      : BuiltinAgentRegistry.getBuiltinAgents();
+    this.subagentsCache.set('builtin', builtinSubagents);
+
+    // Notify listeners so TaskTool can refresh its available subagents list
     this.notifyChangeListeners();
   }
 
@@ -808,6 +866,10 @@ export class SubagentManager {
   ): Promise<SubagentConfig[]> {
     // Handle built-in agents
     if (level === 'builtin') {
+      // Check if builtin subagents are disabled
+      if (this.config.getDisableBuiltinSubagents()) {
+        return [];
+      }
       return BuiltinAgentRegistry.getBuiltinAgents();
     }
 

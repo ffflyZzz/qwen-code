@@ -366,6 +366,8 @@ export interface ConfigParameters {
   channel?: string;
   /** Model providers configuration grouped by authType */
   modelProvidersConfig?: ModelProvidersConfig;
+  /** Disable builtin subagents (when true, no builtin subagents are loaded) */
+  disableBuiltinSubagents?: boolean;
 }
 
 function normalizeConfigOutputFormat(
@@ -506,6 +508,7 @@ export class Config {
   private readonly eventEmitter?: EventEmitter;
   private readonly useSmartEdit: boolean;
   private readonly channel: string | undefined;
+  private disableBuiltinSubagents: boolean;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId ?? randomUUID();
@@ -617,6 +620,7 @@ export class Config {
     this.useSmartEdit = params.useSmartEdit ?? false;
     this.extensionManagement = params.extensionManagement ?? true;
     this.channel = params.channel;
+    this.disableBuiltinSubagents = params.disableBuiltinSubagents ?? false;
     this.storage = new Storage(this.targetDir);
     this.vlmSwitchMode = params.vlmSwitchMode;
     this.inputFormat = params.inputFormat ?? InputFormat.TEXT;
@@ -1048,6 +1052,28 @@ export class Config {
 
   setSdkMode(value: boolean): void {
     this.sdkMode = value;
+  }
+
+  getDisableBuiltinSubagents(): boolean {
+    return this.disableBuiltinSubagents;
+  }
+
+  /**
+   * Dynamically update the disableBuiltinSubagents setting.
+   * This also refreshes the SubagentManager cache to reflect the change.
+   */
+  setDisableBuiltinSubagents(value: boolean): void {
+    if (this.disableBuiltinSubagents === value) {
+      return; // No change
+    }
+    this.disableBuiltinSubagents = value;
+
+    // Refresh SubagentManager cache to reflect the change
+    const subagentManager = this.getSubagentManager();
+    if (subagentManager) {
+      // Force cache refresh by marking builtin level as needing update
+      subagentManager.refreshBuiltinCache(value);
+    }
   }
 
   getUserMemory(): string {
